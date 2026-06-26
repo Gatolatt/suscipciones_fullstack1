@@ -1,68 +1,83 @@
-name: "Revision de MarkDown"
+name: DevOps Pipeline - Suscripciones Fullstack
 
 on:
   push:
-    branches: [ "main", "feature/**", "docs/**" ]
+    branches: [ main, develop ]
   pull_request:
-    branches: [ "main" ]
+    branches: [ main ]
 
 jobs:
-  build-and-push:
-    name: "Verify, Test & Push"
+  test-and-audit:
     runs-on: ubuntu-latest
-    
     steps:
-      - name: "Checkout Code"
-        uses: actions/checkout@v4
+      - name: Checkout del código
+        uses: actions/checkout@v3
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v3
         with:
-          fetch-depth: 0 
+          node-version: '18'
+          cache: 'npm'
 
-      - name: "Set up JDK 21"
-        uses: actions/setup-java@v4
-        with:
-          java-version: '21'
-          distribution: 'temurin'
-          cache: 'maven'
+      - name: Instalar dependencias
+        run: npm ci
 
+      # IE3 / IE6: Ejecución de pruebas unitarias. Si fallan, el pipeline se detiene aquí.
+      - name: Ejecutar Pruebas Técnicas y Cobertura
+        run: npm test -- --coverage
 
-      - name: "SonarQube Scan"
+      # IE5 / IE6: Análisis estático de código con SonarQube
+      # Si el Quality Gate de SonarQube no se cumple (falla de seguridad/calidad), interrumpe el pipeline.
+      - name: Analizar código con SonarQube
+        uses: sonarsource/sonarqube-scan-action@master
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-        run: |
-          ./mvnw -B verify org.sonarsource.scanner.maven:sonar-maven-plugin:sonar \
-            -Dsonar.host.url=https://sonarcloud.io \
-            -Dsonar.organization=gatolatt \
-            -Dsonar.projectKey=suscripciones_fullstack1
-
-
-      - name: "Login to Docker Hub"
-        uses: docker/login-action@v3
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          args: >
+            -Dsonar.projectKey=suscripciones_fullstack
+            -Dsonar.sources=src
+            -Dsonar.tests=tests
+            -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info
 
-      - name: "Set up Docker Buildx"
-        uses: docker/setup-buildx-action@v3
+      # IE6: Forzar la validación del Quality Gate. 
+      # Rompe el pipeline automáticamente ("fail-fast") si hay vulnerabilidades críticas.
+      - name: Validar Quality Gate de SonarQube
+        uses: sonarsource/sonarqube-quality-gate-action@master
+        timeout-minutes: 5
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+  deploy:
+    needs: test-and-audit # IE6: Solo se ejecuta si el trabajo anterior pasó de forma exitosa
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' # Solo despliega en producción simulada desde main
+    steps:
+      - name: Checkout del código
+        uses: actions/checkout@v3
+
+      - name: Iniciar sesión en Docker Hub
+        uses: docker/login-action@v2
         with:
-          driver: docker-container
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
 
-      - name: "Extract Metadata"
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ secrets.DOCKERHUB_USERNAME }}/suscripciones-api
-          tags: |
-            type=raw,value=latest
-            type=sha,value={{sha}}
-
-      - name: "Build and Push Image"
-        uses: docker/build-push-action@v5
+      - name: Construir y Subir Imagen Docker
+        uses: docker/build-push-action@v4
         with:
           context: .
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          tags: ${{ secrets.DOCKER_USERNAME }}/suscripciones:latest
 
-      - name: "Finalización Exitosa"
-        run: echo "🚀 Imagen subida a Docker Hub ${{ secrets.DOCKERHUB_USERNAME }}/suscripciones-api:latest"
+      # IE2: Configuración de acceso al clúster de Kubernetes en la nube elegida
+      - name: Configurar contexto de Kubernetes
+        uses: azure/k8s-set-context@v3
+        with:
+          method: kubeconfig
+          kubeconfig: ${{ secrets.KUBE_CONFIG }}
+
+      # IE2: Despliegue automatizado en el clúster usando el archivo creado previamente
+      - name: Desplegar en clúster Kubernetes
+        run: |
+          kubectl apply -f k8s/k8s-deployment.yaml
+          kubectl rollout status deployment/suscripciones-app
