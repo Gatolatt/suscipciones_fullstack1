@@ -30,7 +30,9 @@ jobs:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: |
           ./mvnw -B verify org.sonarsource.scanner.maven:sonar-maven-plugin:sonar \
-            -Dsonar.host.url=https://sonarcloud.io
+            -Dsonar.host.url=https://sonarcloud.io \
+            -Dsonar.organization=gatolatt \
+            -Dsonar.projectKey=suscripciones_fullstack1
 
 
       - name: "Login to Docker Hub"
