@@ -11,7 +11,7 @@ scrape_configs:
       - targets:
           - localhost
         labels:
-          job: spring-logs
+          job: spring-logs        # <-- Este es el nombre exacto que busca Grafana
           environment: development
           app: suscipciones-api
-          __path__: /var/log/app/*.log 
+          __path__: /var/log/app/*.log  # <-- Ruta interna del contenedor de Promtail
