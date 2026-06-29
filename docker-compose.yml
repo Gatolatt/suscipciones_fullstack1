@@ -1,8 +1,48 @@
+version: "3.8"
+networks:
+  loki-net:
 version: '3.8'
 
 services:
   app-spring:
     build:
+      context: ./
+    container_name: mi-spring-app
+    volumes:
+      - ./logs:/app/logs # La app escribe aquí
+    ports:
+      - "8080:8080"
+    networks:
+      - loki-net
+
+  loki:
+    image: grafana/loki:2.9.0
+    ports:
+      - "3100:3100"
+    networks:
+      - loki-net
+
+  promtail:
+    image: grafana/promtail:2.9.0
+    volumes:
+      - ./logs:/var/log/app # Promtail lee la misma carpeta física del host
+      - ./promtail-config.yml:/etc/promtail/config.yml
+    command: -config.file=/etc/promtail/config.yml
+    networks:
+      - loki-net
+    depends_on:
+      - loki
+
+  grafana:
+    image: grafana/grafana:10.2.0
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    networks:
+      - loki-net
+    depends_on:
+      - loki
       context: .
     container_name: mi-spring-app
     ports:
