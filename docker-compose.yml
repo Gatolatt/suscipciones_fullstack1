@@ -1,7 +1,6 @@
-version: "3.8"
 networks:
   loki-net:
-version: '3.8'
+    driver: bridge
 
 services:
   app-spring:
@@ -9,7 +8,7 @@ services:
       context: ./
     container_name: mi-spring-app
     volumes:
-      - ./logs:/app/logs 
+      - ./logs:/app/logs # Carpeta donde tu aplicación Spring Boot creará el archivo app.log
     ports:
       - "8080:8080"
     networks:
@@ -17,15 +16,18 @@ services:
 
   loki:
     image: grafana/loki:2.9.0
+    container_name: loki-server
     ports:
       - "3100:3100"
+    command: -config.file=/etc/loki/local-config.yaml
     networks:
       - loki-net
 
   promtail:
     image: grafana/promtail:2.9.0
+    container_name: promtail-agent
     volumes:
-      - ./logs:/var/log/app 
+      - ./logs:/var/log/app # Promtail lee exactamente la misma carpeta física mapeada del host
       - ./promtail-config.yml:/etc/promtail/config.yml
     command: -config.file=/etc/promtail/config.yml
     networks:
@@ -35,6 +37,7 @@ services:
 
   grafana:
     image: grafana/grafana:10.2.0
+    container_name: grafana-dashboard
     ports:
       - "3000:3000"
     environment:
@@ -43,23 +46,3 @@ services:
       - loki-net
     depends_on:
       - loki
-      context: .
-    container_name: mi-spring-app
-    ports:
-      - "8080:8080"
-    networks:
-      - monitoring-net
-
-  prometheus:
-    image: prom/prometheus:latest
-    container_name: prometheus
-    volumes:
-      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
-    ports:
-      - "9090:9090"
-    networks:
-      - monitoring-net
-
-networks:
-  monitoring-net:
-    driver: bridge
