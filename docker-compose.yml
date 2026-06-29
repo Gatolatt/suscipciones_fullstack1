@@ -1,6 +1,7 @@
 version: "3.8"
 networks:
   loki-net:
+version: '3.8'
 
 services:
   app-spring:
@@ -42,3 +43,23 @@ services:
       - loki-net
     depends_on:
       - loki
+      context: .
+    container_name: mi-spring-app
+    ports:
+      - "8080:8080"
+    networks:
+      - monitoring-net
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+    networks:
+      - monitoring-net
+
+networks:
+  monitoring-net:
+    driver: bridge
