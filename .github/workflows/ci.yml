@@ -40,8 +40,7 @@ jobs:
             -Dsonar.tests=tests
             -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info
 
-      # IE6: Forzar la validación del Quality Gate. 
-      # Rompe el pipeline automáticamente ("fail-fast") si hay vulnerabilidades críticas.
+     
       - name: Validar Quality Gate de SonarQube
         uses: sonarsource/sonarqube-quality-gate-action@master
         timeout-minutes: 5
@@ -49,9 +48,9 @@ jobs:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
   deploy:
-    needs: test-and-audit # IE6: Solo se ejecuta si el trabajo anterior pasó de forma exitosa
+    needs: test-and-audit 
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' # Solo despliega en producción simulada desde main
+    if: github.ref == 'refs/heads/main' 
     steps:
       - name: Checkout del código
         uses: actions/checkout@v3
@@ -69,14 +68,13 @@ jobs:
           push: true
           tags: ${{ secrets.DOCKER_USERNAME }}/suscripciones:latest
 
-      # IE2: Configuración de acceso al clúster de Kubernetes en la nube elegida
+ 
       - name: Configurar contexto de Kubernetes
         uses: azure/k8s-set-context@v3
         with:
           method: kubeconfig
           kubeconfig: ${{ secrets.KUBE_CONFIG }}
 
-      # IE2: Despliegue automatizado en el clúster usando el archivo creado previamente
       - name: Desplegar en clúster Kubernetes
         run: |
           kubectl apply -f k8s/k8s-deployment.yaml
