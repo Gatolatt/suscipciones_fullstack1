@@ -44,6 +44,8 @@ services:
       - "9090:9090"
     networks:
       - loki-net
+    depends_on:
+      - app-spring
 
   grafana:
     image: grafana/grafana:10.2.0
