@@ -1,84 +1,106 @@
-name: DevOps Pipeline - Suscripciones Fullstack
+name: "Revision de MarkDown"
 
 on:
   push:
-    branches: [ main, develop ]
+    # Se ejecuta cada vez que hacemos push en estas ramas
+    branches: [ "main", "feature/**", "docs/**" ]
   pull_request:
-    branches: [ main ]
+    # Se ejecuta en cada pull request hacia la rama principal
+    branches: [ "main" ]
 
 jobs:
-  test-and-audit:
+  build-and-push:
+    name: "Build Docker Image & Push"
     runs-on: ubuntu-latest
+    
     steps:
-      - name: Checkout del código
-        uses: actions/checkout@v3
+      - name: "Checkout Code"
+        uses: actions/checkout@v4
 
-      - name: Configurar Node.js
-        uses: actions/setup-node@v3
+      - name: "Set up JDK 21"
+        uses: actions/setup-java@v4
         with:
-          node-version: '18'
-          cache: 'npm'
+          java-version: '21'
+          distribution: 'temurin'
+          cache: 'maven'
 
-      - name: Instalar dependencias
-        run: npm ci
-
-      # IE3 / IE6: Ejecución de pruebas unitarias. Si fallan, el pipeline se detiene aquí.
-      # IE3 / IE6: Ejecución de pruebas unitarias. Si fallan, el pipeline se detiene.
-      - name: Ejecutar Pruebas Técnicas y Cobertura
-        run: ./mvnw test
-
-      # IE5 / IE6: Análisis estático de código con SonarQube
-      # Si el Quality Gate de SonarQube no se cumple (falla de seguridad/calidad), interrumpe el pipeline.
-      - name: Analizar código con SonarQube
-        uses: sonarsource/sonarqube-scan-action@master
+      - name: "Test and Analyze with SonarCloud"
         env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # Proveído automáticamente por GitHub
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}   
+        run: mvn -B verify org.sonarsource.scanner.maven:sonar-maven-plugin:sonar -Dsonar.projectKey=visviriDeveloper_evaluacion3_devOps -Dsonar.organization=visvirideveloper -Dsonar.qualitygate.wait=true -Dsonar.coverage.exclusions="**/*"
+
+      - name: "Login to Docker Hub"
+        uses: docker/login-action@v3
         with:
-          args: >
-            -Dsonar.projectKey=suscripciones_fullstack
-            -Dsonar.sources=src
-            -Dsonar.tests=tests
-            -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info
-
-      # IE6: Forzar la validación del Quality Gate. 
-      # Rompe el pipeline automáticamente ("fail-fast") si hay vulnerabilidades críticas.
-      - name: Validar Quality Gate de SonarQube
-        uses: sonarsource/sonarqube-quality-gate-action@master
-        timeout-minutes: 5
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-
-  deploy:
-    needs: test-and-audit # IE6: Solo se ejecuta si el trabajo anterior pasó de forma exitosa
-    runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' # Solo despliega en producción simulada desde main
-    steps:
-      - name: Checkout del código
-        uses: actions/checkout@v3
-
-      - name: Iniciar sesión en Docker Hub
-        uses: docker/login-action@v2
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          
+     
+      - name: "Set up Docker Buildx"
+        uses: docker/setup-buildx-action@v3
         with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
+          driver: docker-container
+          
+      - name: "Extract Metadata"
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ secrets.DOCKERHUB_USERNAME }}/rentacar
+          tags: |
+            type=raw,value=latest
+            type=sha,value={{sha}}
 
-      - name: Construir y Subir Imagen Docker
-        uses: docker/build-push-action@v4
+      - name: "Build and Push Image to Docker Hub"
+        uses: docker/build-push-action@v5
         with:
           context: .
           push: true
-          tags: ${{ secrets.DOCKER_USERNAME }}/suscripciones:latest
+          tags: ${{ steps.meta.outputs.tags }}
+          # Optimizamos el build usando cache nativo de GitHub
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
-      # IE2: Configuración de acceso al clúster de Kubernetes en la nube elegida
-      - name: Configurar contexto de Kubernetes
-        uses: azure/k8s-set-context@v3
+      - name: "Finalización Exitosa Docker Hub"
+        run: echo "🚀 Imagen subida a Docker Hub ${{ secrets.DOCKERHUB_USERNAME }}/rentacar:latest"
+
+      # --- 2. SECCIÓN AWS (ECR + ECS) ---
+      - name: "Configurar credenciales AWS"
+        uses: aws-actions/configure-aws-credentials@v4
         with:
-          method: kubeconfig
-          kubeconfig: ${{ secrets.KUBE_CONFIG }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ secrets.AWS_REGION }}
 
-      # IE2: Despliegue automatizado en el clúster usando el archivo creado previamente
-      - name: Desplegar en clúster Kubernetes
+      - name: "Login en Amazon ECR"
+        uses: aws-actions/amazon-ecr-login@v1
+
+      - name: "Build imagen y push a ECR"
         run: |
-          kubectl apply -f k8s/k8s-deployment.yaml
-          kubectl rollout status deployment/suscripciones-app
+          docker build -t rentacar-api .
+          docker tag rentacar-api:latest ${{ secrets.ECR_REPO_URL_RENTACAR }}:latest
+          docker push ${{ secrets.ECR_REPO_URL_RENTACAR }}:latest
+
+      - name: "Descargar Task Definition actual"
+        run: |
+          aws ecs describe-task-definition --task-definition ${{ secrets.ECS_TASK_DEFINITION_NAME }} --query taskDefinition > task-definition.json
+
+      - name: "Actualizar Tag de la imagen en la Task Def"
+        id: render-task-def
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: task-definition.json
+          container-name: rentacar-container  # Nombre exacto que configuraste en el contenedor de ECS
+          image: ${{ secrets.ECR_REPO_URL_RENTACAR }}:latest
+
+      - name: "Desplegar nueva Task Definition en el Servicio"
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: ${{ steps.render-task-def.outputs.task-definition }}
+          service: ${{ secrets.ECS_SERVICE_NAME }}
+          cluster: ${{ secrets.ECS_CLUSTER_NAME }}
+          wait-for-service-stability: true
+          
+      - name: "Finalización Exitosa AWS"
+        run: echo "☁️ Despliegue completado exitosamente en AWS ECS Fargate"
