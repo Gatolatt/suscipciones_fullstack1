@@ -23,8 +23,9 @@ jobs:
         run: npm ci
 
       # IE3 / IE6: Ejecución de pruebas unitarias. Si fallan, el pipeline se detiene aquí.
+      # IE3 / IE6: Ejecución de pruebas unitarias. Si fallan, el pipeline se detiene.
       - name: Ejecutar Pruebas Técnicas y Cobertura
-        run: npm test -- --coverage
+        run: ./mvnw test
 
       # IE5 / IE6: Análisis estático de código con SonarQube
       # Si el Quality Gate de SonarQube no se cumple (falla de seguridad/calidad), interrumpe el pipeline.
